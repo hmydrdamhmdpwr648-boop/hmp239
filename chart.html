@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <title>پیش‌بینی ضریب انفجار</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      background-color: #111;
+      color: #eee;
+      font-family: Tahoma, sans-serif;
+      text-align: center;
+      direction: rtl;
+    }
+    canvas {
+      max-width: 1000px;
+      margin: 30px auto;
+    }
+    .alert {
+      background-color: #222;
+      border: 1px solid #00f2ff;
+      color: #00f2ff;
+      padding: 10px 20px;
+      margin-top: 20px;
+      display: inline-block;
+      border-radius: 10px;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>📈 پیش‌بینی هوش مصنوعی ضرایب انفجار</h1>
+  <canvas id="zaribChart"></canvas>
+  <div id="alertBox"></div>
+  <p id="prediction" style="font-size: 1.2em; margin-top: 20px;"></p>
+
+  <script>
+    const ctx = document.getElementById('zaribChart').getContext('2d');
+    let chart;
+    let lastDataLength = 0;
+
+    async function fetchData() {
+      const response = await fetch('zarib_data.csv?_=' + new Date().getTime()); // جلوگیری از کش
+      const text = await response.text();
+      const lines = text.trim().split('\n').slice(1); // حذف عنوان
+      const labels = [];
+      const data = [];
+      lines.forEach(line => {
+        const [id, zarib] = line.split(',');
+        labels.push(id);
+        data.push(parseFloat(zarib));
+      });
+      return { labels, data };
+    }
+
+    function createChart(labels, data, prediction = null) {
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'ضریب‌ها',
+            data: data,
+            borderColor: '#00ffcc',
+            backgroundColor: 'rgba(0,255,204,0.1)',
+            tension: 0.2,
+            pointRadius: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#ccc' }
+            },
+            x: {
+              ticks: { color: '#ccc' }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: {
+                color: '#ccc'
+              }
+            }
+          }
+        }
+      });
+
+      if (prediction !== null) {
+        document.getElementById('prediction').textContent = `🤖 پیش‌بینی ضریب بعدی: ${prediction.toFixed(2)}`;
+      } else {
+        document.getElementById('prediction').textContent = '';
+      }
+    }
+
+    async function predictNext(data) {
+      const xs = tf.tensor1d(data.map((_, i) => i));
+      const ys = tf.tensor1d(data);
+
+      const model = tf.sequential();
+      model.add(tf.layers.dense({ inputShape: [1], units: 10, activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 1 }));
+
+      model.compile({ loss: 'meanSquaredError', optimizer: 'adam' });
+
+      await model.fit(xs, ys, { epochs: 50, verbose: 0 });
+
+      const nextX = tf.tensor1d([data.length]);
+      const prediction = model.predict(nextX);
+      const result = await prediction.data();
+      return result[0];
+    }
+
+    async function loadAndUpdateChart() {
+      const { labels, data } = await fetchData();
+
+      if (data.length !== lastDataLength) {
+        lastDataLength = data.length;
+
+        if (data.length >= 20) {
+          const pred = await predictNext(data);
+          createChart(labels, data, pred);
+          document.getElementById('alertBox').innerHTML = '';
+        } else {
+          createChart(labels, data);
+          const remain = 20 - data.length;
+          document.getElementById('alertBox').innerHTML =
+            `<div class="alert">🕒 فقط ${remain} ضریب دیگر تا فعال‌شدن پیش‌بینی!</div>`;
+        }
+      }
+    }
+
+    // اجرای اولیه
+    loadAndUpdateChart();
+
+    // بررسی خودکار هر 1 ثانیه
+    setInterval(loadAndUpdateChart, 1000);
+  </script>
+</body>
+</html>
